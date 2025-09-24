@@ -2,7 +2,7 @@ import logging
 from importlib.metadata import version
 from lsprotocol.types import Position, Range, Location
 from packaging.version import Version
-from couleuvre.ast.ast import BaseNode
+from couleuvre.ast_parser.vyper_ast import BaseNode
 
 logger = logging.getLogger("couleuvre")
 

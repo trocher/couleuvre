@@ -1,5 +1,5 @@
 import pytest
-from couleuvre.ast.ast_parser import get_json_ast
+from couleuvre.ast_parser.ast_parser import get_json_ast
 
 EXAMPLE_VYPER_CONTRACT = """
 @external

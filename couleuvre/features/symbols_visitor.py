@@ -4,7 +4,7 @@ from typing import List, Tuple
 from lsprotocol import types
 from lsprotocol.types import SymbolKind
 
-from couleuvre.ast import ast
+from couleuvre.ast_parser import vyper_ast
 from couleuvre.parser.parse import Module
 from couleuvre.utils import range_from_node
 
@@ -59,7 +59,7 @@ class SymbolVisitor(VyperNodeVisitorBase):
     def visit_FlagDef(self, node):
         children = []
         for child in node.body:
-            assert isinstance(child, ast.Expr)
+            assert isinstance(child, vyper_ast.Expr)
             children += self.visit(child.value, SymbolKind.EnumMember)
         return [get_symbol(node, node.name, SymbolKind.Enum, children)]
 
@@ -101,10 +101,10 @@ class SymbolVisitor(VyperNodeVisitorBase):
     def visit_AnnAssign(self, node, kind=None):
         if not kind:
             # Old vyper version would have variable declaration as AnnAssign
-            if isinstance(node.parent, ast.Module):
+            if isinstance(node.parent, vyper_ast.Module):
                 return [get_symbol(node, node.target.id, SymbolKind.Variable)]
         # assert kind in (SymbolKind.Field,) removed because of default args most likely.
-        if isinstance(node.parent, (ast.EventDef, ast.StructDef)):
+        if isinstance(node.parent, (vyper_ast.EventDef, vyper_ast.StructDef)):
             return [get_symbol(node, node.target.id, SymbolKind.Field)]
         return []
 
@@ -124,7 +124,7 @@ class SymbolVisitor(VyperNodeVisitorBase):
         return symbols
 
     def visit_Name(self, node, kind=SymbolKind.Variable):
-        if isinstance(node.parent.parent, ast.FlagDef):
+        if isinstance(node.parent.parent, vyper_ast.FlagDef):
             assert kind == SymbolKind.EnumMember
             return [get_symbol(node, node.id, kind)]
         return []

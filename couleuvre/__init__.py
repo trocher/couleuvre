@@ -1,1 +1,1 @@
-from .main import server  # noqa: F401
+from couleuvre.main import server  # noqa: F401

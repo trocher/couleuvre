@@ -3,8 +3,8 @@ from pathlib import Path
 import subprocess
 import json
 import sys
-from couleuvre.ast.vyper_wrapper import ensure_vyper_version
-from couleuvre.ast.ast import BaseNode, AST_CLASS_MAP
+from couleuvre.ast_parser.vyper_wrapper import ensure_vyper_version
+from couleuvre.ast_parser.vyper_ast import BaseNode, AST_CLASS_MAP
 import logging
 from typing import Any, Dict, Optional
 from packaging.version import Version

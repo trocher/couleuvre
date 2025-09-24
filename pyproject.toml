@@ -15,11 +15,23 @@ dependencies = [
     "uv>=0.7.7",
 ]
 
+[project.scripts]
+couleuvre = "couleuvre.main:main"
+
+[build-system]
+requires = ["uv_build>=0.8.22,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "couleuvre"
+module-root = ""
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
 ]
+
 
 [tool.pyright]
 venvPath = "."

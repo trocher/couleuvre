@@ -5,7 +5,7 @@ from pygls.server import LanguageServer
 from lsprotocol import types
 from pygls.workspace import TextDocument
 from pygls import uris
-from couleuvre.ast.ast import BaseNode
+from couleuvre.ast_parser.vyper_ast import BaseNode
 from couleuvre.cli import start_server
 from couleuvre.logger_setup import setup_logging
 from couleuvre import utils

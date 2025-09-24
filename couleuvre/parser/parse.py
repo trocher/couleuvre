@@ -1,8 +1,8 @@
 import logging
 import re
 from typing import Optional, Tuple
-from couleuvre.ast import ast
-from couleuvre.ast.ast_parser import get_json_ast
+from couleuvre.ast_parser import vyper_ast
+from couleuvre.ast_parser.ast_parser import get_json_ast
 from pathlib import Path
 
 logger = logging.getLogger("couleuvre")
@@ -141,8 +141,10 @@ class VyperAstVisitor(VyperNodeVisitorBase):
 
     # For backwards compatibility
     def visit_AnnAssign(self, node):
-        if isinstance(node.parent, ast.Module):
-            if node.annotation is not None and isinstance(node.annotation, ast.Call):
+        if isinstance(node.parent, vyper_ast.Module):
+            if node.annotation is not None and isinstance(
+                node.annotation, vyper_ast.Call
+            ):
                 if (
                     node.annotation.func.id == "constant"
                     or node.annotation.func.id == "immutable"
