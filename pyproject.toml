@@ -1,0 +1,30 @@
+[project]
+name = "couleuvre"
+version = "0.0.1"
+description = "Vyper Language Server"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [
+    {name = "trocher", email = "tanguy.rocher@chainsecurity.com"}
+]
+keywords = ["vyper", "language-server", "lsp"]
+dependencies = [
+    "lsprotocol>=2023.0.1",
+    "pygls>=1.3.1",
+    "uv>=0.7.7",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.2.0",
+    "pytest>=8.3.5",
+]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
