@@ -1,9 +1,18 @@
 import logging
-from pygls.server import LanguageServer
+from pygls.lsp.server import LanguageServer
+from lsprotocol.types import LogMessageParams, MessageType
 
 
 class LspLogHandler(logging.Handler):
     """Custom log handler that sends logs to the LSP client."""
+
+    LEVEL_TO_MESSAGE_TYPE = {
+        logging.CRITICAL: MessageType.Error,
+        logging.ERROR: MessageType.Error,
+        logging.WARNING: MessageType.Warning,
+        logging.INFO: MessageType.Info,
+        logging.DEBUG: MessageType.Log,
+    }
 
     def __init__(self, ls: LanguageServer):
         super().__init__()
@@ -13,8 +22,13 @@ class LspLogHandler(logging.Handler):
         try:
             message = self.format(record)
             # Avoid sending logs if the server isn't fully initialized
-            if self.ls and hasattr(self.ls, "show_message_log"):
-                self.ls.show_message_log(message)
+            if self.ls and hasattr(self.ls, "window_log_message"):
+                message_type = self.LEVEL_TO_MESSAGE_TYPE.get(
+                    record.levelno, MessageType.Log
+                )
+                self.ls.window_log_message(
+                    LogMessageParams(message=message, type=message_type)
+                )
         except Exception:
             self.handleError(record)
 
