@@ -1,12 +1,12 @@
 import logging
 import re
 from typing import Dict
-from pygls.server import LanguageServer
+from pygls.lsp.server import LanguageServer
+from pygls.cli import start_server
 from lsprotocol import types
 from pygls.workspace import TextDocument
 from pygls import uris
 from couleuvre.ast_parser.vyper_ast import BaseNode
-from couleuvre.cli import start_server
 from couleuvre.logger_setup import setup_logging
 from couleuvre import utils
 from couleuvre.parser.parse import Module, parse_module
@@ -21,7 +21,8 @@ class VyperLanguageServer(LanguageServer):
         self.modules: Dict = {}
         self.logger = setup_logging(self)  # Inject logging on init
         self.logger.info("Vyper Language Server starting...")
-        self.default_version = None
+        installed_version = utils.get_installed_vyper_version()
+        self.default_version = str(installed_version) if installed_version else None
 
     def parse(self, doc: TextDocument, workspace_path=None):
         self.modules[doc.uri] = parse_module(
@@ -143,5 +144,4 @@ def goto_definition(ls: VyperLanguageServer, params: types.DefinitionParams):
 
 
 def main():
-    # TODO: replace by pygls.cli once it is released
     start_server(server)
