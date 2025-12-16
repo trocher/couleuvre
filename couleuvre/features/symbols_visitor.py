@@ -1,21 +1,32 @@
+"""
+Document symbol extraction for the Vyper Language Server.
+
+This module provides functionality to extract document symbols (functions,
+variables, structs, etc.) from a parsed Vyper module for IDE navigation.
+"""
+
 import logging
-from typing import List, Tuple
+from typing import List, Optional, Tuple, Type
 
 from lsprotocol import types
 from lsprotocol.types import SymbolKind
 
-from couleuvre.ast_parser import vyper_ast
+from couleuvre.ast import nodes
+from couleuvre.ast.nodes import BaseNode
 from couleuvre.parser.parse import Module
 from couleuvre.utils import range_from_node
 
-logger = logging.getLogger("vyper-lsp")
+logger = logging.getLogger("couleuvre")
 
 
 class VyperNodeVisitorBase:
-    ignored_types: Tuple = ()
-    scope_name = ""
+    """Base class for AST visitors that extract information from nodes."""
 
-    def visit(self, node, *args):
+    ignored_types: Tuple[Type[BaseNode], ...] = ()
+    scope_name: str = ""
+
+    def visit(self, node: BaseNode, *args) -> List:
+        """Visit a node and dispatch to the appropriate visitor method."""
         if isinstance(node, self.ignored_types):
             return []
         node_type = type(node).__name__
@@ -26,19 +37,32 @@ class VyperNodeVisitorBase:
 
 
 def get_document_symbols(module: Module) -> List[types.DocumentSymbol]:
+    """
+    Extract all document symbols from a parsed Vyper module.
+
+    Args:
+        module: The parsed Vyper module.
+
+    Returns:
+        List of DocumentSymbol objects representing the module's symbols.
+    """
     visitor = SymbolVisitor()
     return visitor.visit(module.ast)
 
 
-def get_symbol(node, name, kind, children=None):
-    if children is None:
-        children = []
+def _make_symbol(
+    node: BaseNode,
+    name: str,
+    kind: SymbolKind,
+    children: Optional[List[types.DocumentSymbol]] = None,
+) -> types.DocumentSymbol:
+    """Create a DocumentSymbol from an AST node."""
     return types.DocumentSymbol(
         name=name,
         kind=kind,
         range=range_from_node(node),
         selection_range=range_from_node(node),
-        children=children,
+        children=children or [],
     )
 
 
@@ -54,14 +78,14 @@ class SymbolVisitor(VyperNodeVisitorBase):
         kind = SymbolKind.Variable
         if node.is_constant or node.is_immutable:
             kind = SymbolKind.Constant
-        return [get_symbol(node, name, kind, [])]
+        return [_make_symbol(node, name, kind, [])]
 
     def visit_FlagDef(self, node):
         children = []
         for child in node.body:
-            assert isinstance(child, vyper_ast.Expr)
+            assert isinstance(child, nodes.Expr)
             children += self.visit(child.value, SymbolKind.EnumMember)
-        return [get_symbol(node, node.name, SymbolKind.Enum, children)]
+        return [_make_symbol(node, node.name, SymbolKind.Enum, children)]
 
     def visit_EventDef(self, node):
         return self._visit_struct_like(node, SymbolKind.Event)
@@ -73,7 +97,7 @@ class SymbolVisitor(VyperNodeVisitorBase):
         children = []
         for child in node.body:
             children += self.visit(child, SymbolKind.Field)
-        return [get_symbol(node, node.name, symbol, children)]
+        return [_make_symbol(node, node.name, symbol, children)]
 
     def visit_FunctionDef(self, node, kind=SymbolKind.Function):
         children = []
@@ -81,13 +105,13 @@ class SymbolVisitor(VyperNodeVisitorBase):
         for child in node.body:
             children += self.visit(child)
         name = node.name
-        return [get_symbol(node, name, kind, children)]
+        return [_make_symbol(node, name, kind, children)]
 
     def visit_InterfaceDef(self, node):
         children = []
         for child in node.body:
             children += self.visit(child, SymbolKind.Method)
-        return [get_symbol(node, node.name, SymbolKind.Interface, children)]
+        return [_make_symbol(node, node.name, SymbolKind.Interface, children)]
 
     def visit_arguments(self, node):
         args = []
@@ -96,16 +120,16 @@ class SymbolVisitor(VyperNodeVisitorBase):
         return args
 
     def visit_arg(self, node):
-        return [get_symbol(node, node.arg, SymbolKind.Variable)]
+        return [_make_symbol(node, node.arg, SymbolKind.Variable)]
 
     def visit_AnnAssign(self, node, kind=None):
         if not kind:
             # Old vyper version would have variable declaration as AnnAssign
-            if isinstance(node.parent, vyper_ast.Module):
-                return [get_symbol(node, node.target.id, SymbolKind.Variable)]
+            if isinstance(node.parent, nodes.Module):
+                return [_make_symbol(node, node.target.id, SymbolKind.Variable)]
         # assert kind in (SymbolKind.Field,) removed because of default args most likely.
-        if isinstance(node.parent, (vyper_ast.EventDef, vyper_ast.StructDef)):
-            return [get_symbol(node, node.target.id, SymbolKind.Field)]
+        if isinstance(node.parent, (nodes.EventDef, nodes.StructDef)):
+            return [_make_symbol(node, node.target.id, SymbolKind.Field)]
         return []
 
     def visit_For(self, node):
@@ -124,7 +148,7 @@ class SymbolVisitor(VyperNodeVisitorBase):
         return symbols
 
     def visit_Name(self, node, kind=SymbolKind.Variable):
-        if isinstance(node.parent.parent, vyper_ast.FlagDef):
+        if isinstance(node.parent.parent, nodes.FlagDef):
             assert kind == SymbolKind.EnumMember
-            return [get_symbol(node, node.id, kind)]
+            return [_make_symbol(node, node.id, kind)]
         return []

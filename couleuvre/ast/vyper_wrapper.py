@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 from packaging.version import Version
@@ -19,6 +20,11 @@ def _get_py_version_for_vy_version(vy_version: str) -> str:
     return "3.10"
 
 
+def _get_venv_python(venv_path: Path) -> str:
+    """Get the path to the Python executable in a virtual environment."""
+    return str(venv_path / "bin" / "python")
+
+
 def ensure_vyper_version(version: str) -> Path:
     """
     Ensure the specified vyper version is available in a uv-managed virtual environment.
@@ -30,23 +36,34 @@ def ensure_vyper_version(version: str) -> Path:
         print(f"[couleuvre] Creating uv env for vyper {version}...")
 
         py_version = _get_py_version_for_vy_version(version)
-        # Create the environment and install vyper using uv
-        # uv venv --python=3.x <venv_path>
+        # Create the environment using uv
         subprocess.run(
-            f"uv venv --python {py_version} {venv_path}",
-            shell=True,
+            ["uv", "venv", "--python", py_version, str(venv_path)],
             check=True,
         )
+
+        venv_python = _get_venv_python(venv_path)
+        env = os.environ.copy()
+        env["VIRTUAL_ENV"] = str(venv_path)
+
         if Version(version) <= Version("0.2.7"):
             subprocess.run(
-                f"source {venv_path}/bin/activate && uv pip install --upgrade setuptools",
-                shell=True,
+                [
+                    "uv",
+                    "pip",
+                    "install",
+                    "--python",
+                    venv_python,
+                    "--upgrade",
+                    "setuptools",
+                ],
+                env=env,
                 check=True,
             )
-        # uv pip install vyper==<version>
+        # Install vyper
         subprocess.run(
-            f"source {venv_path}/bin/activate && uv pip install vyper=={version}",
-            shell=True,
+            ["uv", "pip", "install", "--python", venv_python, f"vyper=={version}"],
+            env=env,
             check=True,
         )
 

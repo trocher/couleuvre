@@ -1,11 +1,24 @@
+"""
+Vyper module parsing and namespace extraction.
+
+This module handles parsing Vyper source files into AST representations
+and building namespace information for symbol resolution.
+"""
+
 import logging
 import re
-from typing import Optional, Tuple
-from couleuvre.ast_parser import vyper_ast
-from couleuvre.ast_parser.ast_parser import get_json_ast
 from pathlib import Path
+from typing import Any, Dict, Optional, Set
+
+from couleuvre.ast import nodes
+from couleuvre.ast.parser import get_json_ast
 
 logger = logging.getLogger("couleuvre")
+
+# Regex pattern to extract Vyper version from pragma or @version annotation
+_VERSION_PATTERN = re.compile(
+    r"#\s*(?:@version|pragma\s+version)\s*(?:[<>=!~^]*)\s*(\d+\.\d+\.\d+)"
+)
 
 
 def parse_module(
@@ -13,76 +26,102 @@ def parse_module(
     default_version: Optional[str] = None,
     workspace_path: Optional[str] = None,
 ) -> "Module":
-    pattern = r"#\s*(?:@version|pragma\s+version)\s*(?:[<>=!~^]*)\s*(\d+\.\d+\.\d+)"
+    """
+    Parse a Vyper source file into a Module with namespace information.
+
+    Args:
+        path: Path to the Vyper source file.
+        default_version: Fallback Vyper version if not specified in file.
+        workspace_path: Root path for resolving relative imports.
+
+    Returns:
+        A Module object with parsed AST and namespace.
+
+    Raises:
+        ValueError: If no version found and no default provided.
+    """
     content = Path(path).read_text()
-    match = re.search(pattern, content)
-    if not match:
-        if default_version is not None:
-            version = default_version
-        else:
-            raise ValueError("Version not found in the content")
-    else:
+    match = _VERSION_PATTERN.search(content)
+    if match:
         version = match.group(1)
-    assert version is not None
+    elif default_version is not None:
+        version = default_version
+    else:
+        raise ValueError(f"Version not found in {path} and no default provided")
+
     vyper_module = get_json_ast(path, version, workspace_path=workspace_path)
     visitor = VyperAstVisitor(vyper_module, version)
     visitor.visit(vyper_module)
     return visitor.module
 
 
-class Import:
-    def __init__(self, module: Optional[str], name: str, alias: Optional[str] = None):
-        self.module = module
-        self.name = name
-        self.alias = alias
-
-
 class Module:
-    def __init__(self, ast, vyper_version):
-        self.version = vyper_version
-        self.ast = ast
-        self.namespace = {"self": {}}
+    """
+    Represents a parsed Vyper module with its AST and namespace.
 
-        self.flags = set()
-        self.functions = set()
-        self.events = set()
-        self.interfaces = set()
-        self.structs = set()
-        self.variables = set()
-        self.imports = dict()
+    Attributes:
+        version: The Vyper version used to parse this module.
+        ast: The root AST node (Module node).
+        namespace: Hierarchical namespace mapping names to AST nodes.
+        flags: Set of FlagDef nodes in this module.
+        functions: Set of FunctionDef nodes in this module.
+        events: Set of EventDef nodes in this module.
+        interfaces: Set of InterfaceDef nodes in this module.
+        structs: Set of StructDef nodes in this module.
+        variables: Set of VariableDecl nodes in this module.
+        imports: Mapping of import aliases to resolved file paths.
+    """
 
-    def external_namespace(self):
+    def __init__(self, ast: nodes.Module, vyper_version: str):
+        self.version: str = vyper_version
+        self.ast: nodes.Module = ast
+        self.namespace: Dict[str, Any] = {"self": {}}
+
+        self.flags: Set[nodes.BaseNode] = set()
+        self.functions: Set[nodes.BaseNode] = set()
+        self.events: Set[nodes.BaseNode] = set()
+        self.interfaces: Set[nodes.BaseNode] = set()
+        self.structs: Set[nodes.BaseNode] = set()
+        self.variables: Set[nodes.BaseNode] = set()
+        self.imports: Dict[str, str] = {}
+
+    def external_namespace(self) -> Dict[str, Any]:
+        """
+        Get the namespace visible to external modules importing this one.
+
+        Returns a flattened namespace that includes both module-level
+        names and self-prefixed names (without the self prefix).
+        """
         return {
             k: v for k, v in self.namespace.items() if k != "self"
         } | self.namespace["self"]
 
 
-class VyperNodeVisitorBase:
-    ignored_types: Tuple = ()
-    scope_name = ""
+class VyperAstVisitor:
+    """
+    Visitor that extracts namespace information from a Vyper AST.
 
-    def visit(self, node, *args):
-        if isinstance(node, self.ignored_types):
-            return
+    Walks the AST and populates a Module with:
+    - Namespace mappings for symbol resolution
+    - Categorized sets of definitions (functions, variables, etc.)
+    - Import path mappings
+    """
+
+    def __init__(self, node: nodes.Module, vyper_version: str):
+        self.module: Module = Module(node, vyper_version)
+
+    def visit(self, node: nodes.BaseNode) -> None:
+        """Visit a node by dispatching to the appropriate visit method."""
         node_type = type(node).__name__
         visitor_fn = getattr(self, f"visit_{node_type}", None)
         if visitor_fn is None:
-            logger.info(
-                f"Unsupported syntax for {self.scope_name} namespace: {node_type}",
-                node,
-            )
+            logger.debug(f"No visitor for node type: {node_type}")
             return
-        visitor_fn(node, *args)
+        visitor_fn(node)
 
-
-class VyperAstVisitor(VyperNodeVisitorBase):
-    def __init__(self, node, vyper_version: str):
-        self.module: Module = Module(node, vyper_version)
-
-    def visit_Module(self, node):
+    def visit_Module(self, node: nodes.Module) -> None:
         for child in node.body:
             self.visit(child)
-        pass
 
     def visit_VariableDecl(self, node):
         self.module.variables.add(node)
@@ -139,15 +178,14 @@ class VyperAstVisitor(VyperNodeVisitorBase):
     def visit_ExportsDecl(self, node):
         pass
 
-    # For backwards compatibility
+    # For backwards compatibility with older Vyper versions
     def visit_AnnAssign(self, node):
-        if isinstance(node.parent, vyper_ast.Module):
-            if node.annotation is not None and isinstance(
-                node.annotation, vyper_ast.Call
-            ):
+        if isinstance(node.parent, nodes.Module):
+            if node.annotation is not None and isinstance(node.annotation, nodes.Call):
                 if (
                     node.annotation.func.id == "constant"
                     or node.annotation.func.id == "immutable"
                 ):
                     self.module.namespace[node.target.id] = node
+                    return
             self.module.namespace["self"][node.target.id] = node
