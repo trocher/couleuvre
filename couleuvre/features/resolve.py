@@ -15,7 +15,8 @@ from pygls.workspace import TextDocument
 
 from couleuvre.ast.nodes import BaseNode
 from couleuvre.ast import nodes
-from couleuvre.parser.parse import Module
+from couleuvre.features.symbol_table import SymbolEntry
+from couleuvre.parser import Module
 
 logger = logging.getLogger("couleuvre")
 
@@ -27,6 +28,28 @@ class ResolvedSymbol:
     node: Optional[BaseNode]
     module: Module
     uri: str
+    entry: Optional[SymbolEntry] = None  # The symbol table entry, if available
+
+
+def _find_enclosing_function(
+    module: Module, position: types.Position
+) -> Optional[nodes.FunctionDef]:
+    """
+    Find the function that contains the given position.
+
+    Args:
+        module: The module to search in.
+        position: The cursor position (0-based line).
+
+    Returns:
+        The FunctionDef node containing the position, or None if at module level.
+    """
+    line = position.line + 1  # AST uses 1-based line numbers
+    for node in module.ast.body:
+        if isinstance(node, nodes.FunctionDef):
+            if node.lineno <= line <= node.end_lineno:
+                return node
+    return None
 
 
 def _is_inside_declaration_context(module: Module, position: types.Position) -> bool:
@@ -138,7 +161,24 @@ def resolve_symbol_for_word(
     if position is not None and _is_inside_declaration_context(module, position):
         return None
 
-    # Only allow self fallback if we're at module level
+    # Find enclosing function for local variable resolution
+    enclosing_function = None
+    if position is not None:
+        enclosing_function = _find_enclosing_function(module, position)
+
+    # Try to resolve using the symbol table (supports local variables)
+    if len(parts) == 1 and enclosing_function is not None:
+        # Single name inside a function - check local scope first
+        entry = module.symbol_table.resolve(parts, position, enclosing_function)
+        if entry is not None:
+            return ResolvedSymbol(entry.node, module, doc.uri, entry)
+
+    # Try module-level resolution via symbol table
+    entry = module.symbol_table.resolve(parts, position, enclosing_function)
+    if entry is not None:
+        return ResolvedSymbol(entry.node, module, doc.uri, entry)
+
+    # Fall back to legacy namespace resolution for backward compatibility
     allow_self_fallback = True
     if position is not None and not _is_at_module_level(module, position):
         allow_self_fallback = False
@@ -149,6 +189,7 @@ def resolve_symbol_for_word(
     if resolved_node:
         return ResolvedSymbol(resolved_node, module, doc.uri)
 
+    # Try to resolve as an import
     root_name, remainder = parts[0], parts[1:]
     if root_name not in module.imports:
         return None

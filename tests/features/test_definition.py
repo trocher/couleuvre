@@ -6,7 +6,7 @@ Uses the VyperTestHarness for clean, declarative tests.
 
 from lsprotocol.types import DefinitionParams, Position, TextDocumentIdentifier
 
-from couleuvre.main import goto_definition
+from couleuvre.server import goto_definition
 
 
 class TestGotoDefinition:
@@ -362,7 +362,7 @@ def foo():
         assert result is None
 
     def test_local_var_does_not_resolve_to_state_var(self, vyper_harness):
-        """Test that a local variable doesn't resolve to state variable with same name."""
+        """Test that a local variable resolves to local definition, not state variable."""
         source = """# pragma version 0.4.0
 
 a: uint256
@@ -372,9 +372,12 @@ def foo():
     a: uint256 = 1
     b: uint256 = a
 """
-        # When cursor is inside the function, 'a' should not resolve to state var
+        # When cursor is inside the function, 'a' should resolve to the LOCAL var (line 6)
+        # not the state variable (line 2)
         vyper_harness.setup(source, word_at_pos="a")
-        vyper_harness.assert_no_definition(cursor_line=6, cursor_char=17)
+        vyper_harness.assert_definition_at(
+            expected_line=6, expected_char=4, cursor_line=7, cursor_char=17
+        )
 
     def test_state_var_at_module_level_resolves(self, vyper_harness):
         """Test that state variable at module level resolves (self fallback enabled)."""
@@ -420,3 +423,82 @@ struct Payment:
 """
         vyper_harness.setup(source, word_at_pos="amount")
         vyper_harness.assert_no_definition(cursor_line=5, cursor_char=4)
+
+    # =========================================================================
+    # Local Variables (Function Arguments, Loop Iterators, etc.)
+    # =========================================================================
+
+    def test_function_argument_definition(self, vyper_harness):
+        """Test goto definition for a function argument."""
+        source = """# pragma version 0.4.0
+
+@external
+def foo(amount: uint256):
+    x: uint256 = amount
+"""
+        vyper_harness.setup(source, word_at_pos="amount")
+        # 'amount' on line 4 should resolve to the function argument on line 3
+        vyper_harness.assert_definition_at(
+            expected_line=3, expected_char=8, cursor_line=4, cursor_char=17
+        )
+
+    def test_local_variable_definition(self, vyper_harness):
+        """Test goto definition for a local variable declared in function body."""
+        source = """# pragma version 0.4.0
+
+@external
+def foo():
+    x: uint256 = 5
+    y: uint256 = x + 1
+"""
+        vyper_harness.setup(source, word_at_pos="x")
+        # 'x' on line 5 should resolve to the local var on line 4
+        vyper_harness.assert_definition_at(
+            expected_line=4, expected_char=4, cursor_line=5, cursor_char=17
+        )
+
+    def test_for_loop_iterator_definition(self, vyper_harness):
+        """Test goto definition for a for loop iterator variable."""
+        source = """# pragma version 0.4.0
+
+@external
+def foo():
+    total: uint256 = 0
+    for i: uint256 in range(10):
+        total += i
+"""
+        vyper_harness.setup(source, word_at_pos="i")
+        # 'i' on line 6 should resolve to the loop iterator on line 5
+        vyper_harness.assert_definition_at(
+            expected_line=5, expected_char=8, cursor_line=6, cursor_char=17
+        )
+
+    def test_multiple_function_arguments(self, vyper_harness):
+        """Test goto definition with multiple function arguments."""
+        source = """# pragma version 0.4.0
+
+@external
+def transfer(sender: address, receiver: address, amount: uint256):
+    x: uint256 = amount
+"""
+        vyper_harness.setup(source, word_at_pos="amount")
+        vyper_harness.assert_definition_at(
+            expected_line=3, expected_char=49, cursor_line=4, cursor_char=17
+        )
+
+    def test_local_variable_shadows_state_variable(self, vyper_harness):
+        """Test that local variable definition shadows state variable."""
+        source = """# pragma version 0.4.0
+
+counter: uint256
+
+@external
+def foo():
+    counter: uint256 = 10
+    x: uint256 = counter
+"""
+        vyper_harness.setup(source, word_at_pos="counter")
+        # 'counter' on line 7 should resolve to the LOCAL var on line 6, not state var on line 2
+        vyper_harness.assert_definition_at(
+            expected_line=6, expected_char=4, cursor_line=7, cursor_char=17
+        )

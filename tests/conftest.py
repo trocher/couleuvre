@@ -19,8 +19,8 @@ from lsprotocol.types import (
 from pygls.workspace import TextDocument
 
 from couleuvre.ast import nodes
-from couleuvre.main import VyperLanguageServer, goto_definition, goto_references
-from couleuvre.parser.parse import Module, parse_module
+from couleuvre.server import VyperLanguageServer, goto_definition, goto_references
+from couleuvre.parser import Module, parse_module
 
 
 # =============================================================================

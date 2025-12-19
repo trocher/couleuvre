@@ -14,8 +14,8 @@ from lsprotocol.types import (
 )
 
 from couleuvre.ast import nodes
-from couleuvre.main import goto_references
-from couleuvre.parser.parse import Module
+from couleuvre.server import goto_references
+from couleuvre.parser import Module
 
 
 class TestGotoReferences:
@@ -618,3 +618,96 @@ class TestGotoReferencesAST:
 
         result = _call_refs(mock_language_server)
         assert len(result) == 0
+
+
+class TestLocalVariableReferences:
+    """Test suite for local variable references."""
+
+    def test_function_argument_references(self, vyper_harness):
+        """Test finding references to a function argument."""
+        source = """# pragma version 0.4.0
+
+@external
+def foo(amount: uint256):
+    x: uint256 = amount
+    y: uint256 = amount + 1
+"""
+        vyper_harness.setup(source, word_at_pos="amount")
+        # References at: line 4 (first usage), line 5 (second usage)
+        vyper_harness.assert_references_at_lines([4, 5], cursor_line=4, cursor_char=17)
+
+    def test_function_argument_with_declaration(self, vyper_harness):
+        """Test finding references to a function argument including declaration."""
+        source = """# pragma version 0.4.0
+
+@external
+def foo(amount: uint256):
+    x: uint256 = amount
+"""
+        vyper_harness.setup(source, word_at_pos="amount")
+        # Declaration at line 3, reference at line 4
+        vyper_harness.assert_references_at_lines(
+            [3, 4], include_declaration=True, cursor_line=4, cursor_char=17
+        )
+
+    def test_local_variable_references(self, vyper_harness):
+        """Test finding references to a local variable."""
+        source = """# pragma version 0.4.0
+
+@external
+def foo():
+    x: uint256 = 5
+    y: uint256 = x + 1
+    z: uint256 = x * 2
+"""
+        vyper_harness.setup(source, word_at_pos="x")
+        # References at: line 5 (first usage), line 6 (second usage)
+        vyper_harness.assert_references_at_lines([5, 6], cursor_line=5, cursor_char=17)
+
+    def test_local_variable_with_declaration(self, vyper_harness):
+        """Test finding references to a local variable including declaration."""
+        source = """# pragma version 0.4.0
+
+@external
+def foo():
+    counter: uint256 = 0
+    counter = counter + 1
+"""
+        vyper_harness.setup(source, word_at_pos="counter")
+        # Declaration at line 4, references at line 5 (both sides of assignment)
+        vyper_harness.assert_references_at_lines(
+            [4, 5, 5], include_declaration=True, cursor_line=5, cursor_char=14
+        )
+
+    def test_for_loop_iterator_references(self, vyper_harness):
+        """Test finding references to a for loop iterator."""
+        source = """# pragma version 0.4.0
+
+@external
+def foo():
+    total: uint256 = 0
+    for i: uint256 in range(10):
+        total += i
+        x: uint256 = i * 2
+"""
+        vyper_harness.setup(source, word_at_pos="i")
+        # References at: line 6 (first usage), line 7 (second usage)
+        vyper_harness.assert_references_at_lines([6, 7], cursor_line=6, cursor_char=17)
+
+    def test_local_var_does_not_leak_to_other_functions(self, vyper_harness):
+        """Test that local variable references don't include other functions."""
+        source = """# pragma version 0.4.0
+
+@external
+def foo():
+    x: uint256 = 5
+    y: uint256 = x
+
+@external
+def bar():
+    x: uint256 = 10
+    z: uint256 = x
+"""
+        vyper_harness.setup(source, word_at_pos="x")
+        # When cursor is in foo(), only references from foo() should be found
+        vyper_harness.assert_references_at_lines([5], cursor_line=5, cursor_char=17)

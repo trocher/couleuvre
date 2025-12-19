@@ -3,6 +3,9 @@ Document symbol extraction for the Vyper Language Server.
 
 This module provides functionality to extract document symbols (functions,
 variables, structs, etc.) from a parsed Vyper module for IDE navigation.
+
+Note: The actual symbol extraction is now handled by the SymbolTable built
+during parsing. This module provides the interface for the LSP server.
 """
 
 import logging
@@ -13,10 +16,28 @@ from lsprotocol.types import SymbolKind
 
 from couleuvre.ast import nodes
 from couleuvre.ast.nodes import BaseNode
-from couleuvre.parser.parse import Module
+from couleuvre.parser import Module
 from couleuvre.utils import range_from_node
 
 logger = logging.getLogger("couleuvre")
+
+
+def get_document_symbols(module: Module) -> List[types.DocumentSymbol]:
+    """
+    Extract all document symbols from a parsed Vyper module.
+
+    Args:
+        module: The parsed Vyper module.
+
+    Returns:
+        List of DocumentSymbol objects representing the module's symbols.
+    """
+    return module.symbol_table.get_document_symbols()
+
+
+# =============================================================================
+# Legacy Visitor (kept for reference and potential edge cases)
+# =============================================================================
 
 
 class VyperNodeVisitorBase:
@@ -36,20 +57,6 @@ class VyperNodeVisitorBase:
         return visitor_fn(node, *args)
 
 
-def get_document_symbols(module: Module) -> List[types.DocumentSymbol]:
-    """
-    Extract all document symbols from a parsed Vyper module.
-
-    Args:
-        module: The parsed Vyper module.
-
-    Returns:
-        List of DocumentSymbol objects representing the module's symbols.
-    """
-    visitor = SymbolVisitor()
-    return visitor.visit(module.ast)
-
-
 def _make_symbol(
     node: BaseNode,
     name: str,
@@ -67,6 +74,13 @@ def _make_symbol(
 
 
 class SymbolVisitor(VyperNodeVisitorBase):
+    """
+    Legacy AST visitor for symbol extraction.
+
+    Note: This is kept for backward compatibility and edge cases.
+    The primary symbol extraction is now done via SymbolTable during parsing.
+    """
+
     def visit_Module(self, node):
         symbols = []
         for child in node.body:

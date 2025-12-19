@@ -11,7 +11,7 @@ from typing import Optional
 from lsprotocol import types
 from pygls.workspace import TextDocument
 
-from couleuvre.parser.parse import Module
+from couleuvre.parser import Module
 from couleuvre import utils
 from couleuvre.features.resolve import resolve_symbol_for_word
 

@@ -8,21 +8,17 @@ references (via imports).
 
 import logging
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Set, Tuple
 
 from lsprotocol import types
 
 from couleuvre.ast import nodes
 from couleuvre.ast.nodes import BaseNode
-from couleuvre.parser.parse import Module
+from couleuvre.features.symbol_table import ReferencePattern
+from couleuvre.parser import Module
 from couleuvre.utils import range_from_node
 
 logger = logging.getLogger("couleuvre")
-
-# A reference pattern is a tuple of:
-# - chain: List[str] - the identifier chain to match (e.g., ["self", "foo"])
-# - allow_prefix_match: bool - if True, matches chains that start with this pattern
-ReferencePattern = Tuple[List[str], bool]
 
 
 # -----------------------------------------------------------------------------
@@ -250,7 +246,7 @@ def find_references(
 
     locations: List[types.Location] = []
     # Track seen locations to avoid duplicates (e.g., Name inside Attribute)
-    seen: set[tuple[int, int, int, int]] = set()
+    seen: Set[Tuple[int, int, int, int]] = set()
 
     def _add_location(node: BaseNode) -> None:
         """Add a location if not already seen."""
@@ -352,10 +348,34 @@ def get_all_references(
     if not resolved or resolved.node is None:
         return []
 
-    patterns = build_reference_patterns(resolved.node)
+    # Check if this is a local variable (use symbol table entry if available)
+    is_local = False
+    enclosing_function = None
+    if resolved.entry is not None and resolved.entry.is_local():
+        is_local = True
+        enclosing_function = resolved.entry.parent_function
+
+    # Get patterns from symbol table entry or build from node
+    if resolved.entry is not None:
+        patterns = resolved.entry.access_patterns
+    else:
+        patterns = build_reference_patterns(resolved.node)
+
     if not patterns:
         return []
 
+    # For local variables, only search within the containing function
+    if is_local and enclosing_function is not None:
+        return find_local_references(
+            module,
+            doc.uri,
+            patterns,
+            enclosing_function,
+            include_declaration,
+            resolved.node,
+        )
+
+    # For module-level symbols, search across all modules
     target_path = normalize_path(_module_path(resolved.module, resolved.uri))
     modules = dict(modules_dict)
     modules.setdefault(doc.uri, module)
@@ -391,5 +411,63 @@ def get_all_references(
                 definition_node,
             )
         )
+
+    return locations
+
+
+def find_local_references(
+    module: Module,
+    uri: str,
+    patterns: List[ReferencePattern],
+    enclosing_function: nodes.FunctionDef,
+    include_declaration: bool,
+    definition_node: Optional[BaseNode] = None,
+) -> List[types.Location]:
+    """
+    Find all references to a local variable within its containing function.
+
+    Args:
+        module: The module to search in.
+        uri: The URI of the module.
+        patterns: Reference patterns to match against.
+        enclosing_function: The function containing the local variable.
+        include_declaration: Whether to include the definition itself.
+        definition_node: The definition node (to optionally include/exclude it).
+
+    Returns:
+        List of Location objects for each reference found.
+    """
+    if not patterns:
+        return []
+
+    locations: List[types.Location] = []
+    seen: Set[Tuple[int, int, int, int]] = set()
+
+    def _add_location(node: BaseNode) -> None:
+        """Add a location if not already seen."""
+        loc = types.Location(uri=uri, range=range_from_node(node))
+        key = (
+            loc.range.start.line,
+            loc.range.start.character,
+            loc.range.end.line,
+            loc.range.end.character,
+        )
+        if key not in seen:
+            seen.add(key)
+            locations.append(loc)
+
+    # Optionally include the declaration itself
+    if include_declaration and definition_node is not None:
+        _add_location(definition_node)
+
+    # Walk the function's AST to find matching references
+    for node in _walk_ast(enclosing_function):
+        chain = _extract_chain(node)
+        if chain is None:
+            continue
+        if definition_node and _is_declaration_node(node, definition_node):
+            continue
+        if _matches_pattern(chain, patterns):
+            _add_location(node)
 
     return locations

@@ -1,5 +1,6 @@
 import json
 import logging
+import tempfile
 from pathlib import Path
 from textwrap import dedent
 from typing import Any, Dict, Optional
@@ -19,19 +20,28 @@ _AST_TYPE_ALIASES = {
 }
 
 
-def get_script(file_path: str, vyper_version: str, search_paths: list[str]) -> str:
+def get_script(
+    file_path: str,
+    vyper_version: str,
+    search_paths: list[str],
+    source: Optional[str] = None,
+) -> str:
     if Version(vyper_version) < Version("0.4.1"):
-        content = Path(file_path).read_text()
+        # For older versions, we can pass source directly to CompilerData
+        if source is None:
+            source = Path(file_path).read_text()
         return dedent(
             f"""
             import json
             from vyper.compiler import CompilerData
 
-            data = CompilerData({json.dumps(content)}).vyper_module
+            data = CompilerData({json.dumps(source)}).vyper_module
             print(json.dumps(data.to_dict()))
             """
         )
 
+    # For version >= 0.4.1, we need to use FilesystemInputBundle which reads from disk.
+    # If source is provided, we'll write it to a temp file and use that path.
     return dedent(
         f"""
         import json
@@ -55,16 +65,45 @@ def get_script(file_path: str, vyper_version: str, search_paths: list[str]) -> s
 
 
 def get_json_ast(
-    path: str, vyper_version: str, workspace_path: Optional[str] = None
+    path: str,
+    vyper_version: str,
+    workspace_path: Optional[str] = None,
+    source: Optional[str] = None,
 ) -> Module:
     env = resolve_environment(vyper_version)
     search_paths = env.get_search_paths(include_sys_path=True)
-    script = get_script(path, vyper_version, search_paths)
 
-    result = env.run_script(script, cwd=workspace_path)
+    # For Vyper >= 0.4.1 with unsaved buffer, write to a temp file
+    # so FilesystemInputBundle can read it
+    temp_file = None
+    effective_path = path
+    if source is not None and Version(vyper_version) >= Version("0.4.1"):
+        # Create temp file with same extension to preserve file type detection
+        suffix = Path(path).suffix or ".vy"
+        temp_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=suffix, delete=False, dir=Path(path).parent
+        )
+        temp_file.write(source)
+        temp_file.close()
+        effective_path = temp_file.name
+
+    try:
+        script = get_script(effective_path, vyper_version, search_paths, source)
+        result = env.run_script(script, cwd=workspace_path)
+    finally:
+        # Clean up temp file if we created one
+        if temp_file is not None:
+            try:
+                Path(temp_file.name).unlink()
+            except OSError:
+                pass
 
     if result.returncode != 0:
         error_message = result.stderr.strip() or "Unknown error"
+        # Replace temp file name with original path in error messages
+        if temp_file is not None:
+            temp_name = Path(temp_file.name).name
+            error_message = error_message.replace(temp_name, Path(path).name)
         logger.error(
             "Failed to get AST for Vyper %s: subprocess error: %s",
             vyper_version,
