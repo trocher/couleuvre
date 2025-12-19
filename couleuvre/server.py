@@ -11,6 +11,7 @@ import logging
 from typing import Dict, List, Optional
 
 from lsprotocol import types
+from pygls import uris
 from pygls.lsp.server import LanguageServer
 from pygls.workspace import TextDocument
 
@@ -181,6 +182,66 @@ class VyperLanguageServer(LanguageServer):
 
         self._parse_tasks[uri] = asyncio.create_task(run_parse_after_delay())
 
+    def schedule_import_parsing(
+        self, module: Module, workspace_path: Optional[str] = None
+    ) -> None:
+        """
+        Schedule background parsing of all imports in a module.
+
+        This pre-parses imported modules so that completion and navigation
+        for imported symbols is instant.
+        """
+        for import_name, resolved_path in module.imports.items():
+            uri = uris.from_fs_path(resolved_path)
+            if not uri:
+                continue
+
+            # Skip if already parsed
+            if uri in self.modules:
+                continue
+
+            # Schedule background parsing
+            async def parse_import(import_uri: str, import_path: str) -> None:
+                try:
+                    # Small delay to not compete with main document parsing
+                    await asyncio.sleep(0.1)
+                    self.logger.debug("Background parsing import: %s", import_path)
+                    await asyncio.to_thread(
+                        self._parse_import, import_uri, import_path, workspace_path
+                    )
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    self.logger.debug("Failed to parse import %s: %s", import_path, e)
+
+            asyncio.create_task(parse_import(uri, resolved_path))
+
+    def _parse_import(
+        self, uri: str, path: str, workspace_path: Optional[str] = None
+    ) -> None:
+        """
+        Parse an imported module and cache it.
+
+        This is a simplified version of parse() that doesn't publish diagnostics.
+        """
+        if uri in self.modules:
+            return
+
+        try:
+            module = parse_module(
+                path,
+                default_version=self.default_version,
+                workspace_path=workspace_path,
+            )
+            self.modules[uri] = module
+            self.logger.debug("Cached import module: %s", uri)
+
+            # Recursively parse imports of this module
+            self.schedule_import_parsing(module, workspace_path)
+        except Exception as e:
+            # Silently fail for imports - they may not be valid standalone
+            self.logger.debug("Could not parse import %s: %s", path, e)
+
     async def _run_full_diagnostics(
         self, doc: TextDocument, workspace_path: Optional[str] = None
     ) -> None:
@@ -252,6 +313,10 @@ def did_open(ls: VyperLanguageServer, params: types.DidOpenTextDocumentParams) -
     doc = ls.workspace.get_text_document(params.text_document.uri)
     # Fast AST parse for navigation
     ls.parse(doc, workspace_path=ls.workspace.root_path)
+    # Schedule background parsing of imports for instant completion
+    module = ls.modules.get(doc.uri)
+    if module:
+        ls.schedule_import_parsing(module, workspace_path=ls.workspace.root_path)
     # Schedule full compilation diagnostics (debounced)
     ls.schedule_diagnostics(doc, workspace_path=ls.workspace.root_path)
 
