@@ -26,6 +26,7 @@ class LspLogHandler(logging.Handler):
                 message_type = self.LEVEL_TO_MESSAGE_TYPE.get(
                     record.levelno, MessageType.Log
                 )
+
                 self.ls.window_log_message(
                     LogMessageParams(message=message, type=message_type)
                 )
@@ -33,9 +34,9 @@ class LspLogHandler(logging.Handler):
             self.handleError(record)
 
 
-def setup_logging(ls: LanguageServer, level=logging.INFO) -> logging.Logger:
+def setup_logging(ls: LanguageServer, level: int = logging.INFO) -> logging.Logger:
     """Configures logging for the LSP server."""
-    logger = logging.getLogger("vyper-lsp")
+    logger = logging.getLogger("couleuvre")
     logger.setLevel(level)
 
     # Prevent duplicate log handlers in case of reload

@@ -1,5 +1,5 @@
-from couleuvre.features.symbols_visitor import get_document_symbols
-from couleuvre.parser.parse import Module, parse_module
+from couleuvre.features.symbols import get_document_symbols
+from couleuvre.parser import Module, parse_module
 from lsprotocol.types import SymbolKind
 from pathlib import Path
 import tempfile
@@ -33,7 +33,9 @@ def test_symbols_real_contract():
     symbols = get_document_symbols(parse_module(str(path)))
     assert len(symbols) == 128
     flattened = _flatten_symbols(symbols)
-    assert len(flattened) == 317
+    # Note: 446 includes local variables (function arguments, loop iterators, etc.)
+    # The old count of 317 did not include local variables
+    assert len(flattened) == 446
 
 
 def test_symbols_constructor():

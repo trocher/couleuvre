@@ -1,1 +1,3 @@
-from couleuvre.main import server  # noqa: F401
+from couleuvre.server import server  # noqa: F401
+
+__all__ = ["server"]

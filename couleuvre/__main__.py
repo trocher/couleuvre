@@ -1,4 +1,6 @@
-from couleuvre.main import main
+"""Entry point for `python -m couleuvre`."""
 
-if __name__ == "__main__":
-    main()
+from couleuvre.server import server
+from pygls.cli import start_server
+
+start_server(server)
