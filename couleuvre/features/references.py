@@ -299,16 +299,83 @@ def normalize_path(path: Optional[str]) -> Optional[str]:
 
 
 def _module_path(module: Module, uri: str) -> Optional[str]:
-    """Get the resolved file path for a module."""
+    """
+    Get the resolved file path for a module.
+
+    Prefers the URI-based path over ast.resolved_path because resolved_path
+    may point to a temp file when parsing unsaved buffers.
+    """
     from pygls import uris as pygls_uris
 
-    path = module.ast.resolved_path or pygls_uris.to_fs_path(uri)
+    # Prefer URI path - resolved_path may be a temp file for unsaved buffers
+    path = pygls_uris.to_fs_path(uri)
+    if path is None:
+        path = module.ast.resolved_path
     if path is None:
         return None
     try:
         return str(Path(path).resolve())
     except Exception:
         return path
+
+
+def _get_search_terms(patterns: List[ReferencePattern]) -> List[str]:
+    """
+    Extract search terms from reference patterns for text-based pre-filtering.
+
+    Returns the last element of each pattern chain (the symbol name itself).
+    """
+    terms: List[str] = []
+    for chain, _ in patterns:
+        if chain:
+            # The symbol name is typically the last element (e.g., "func" in ["self", "func"])
+            terms.append(chain[-1])
+    return list(set(terms))  # deduplicate
+
+
+def _find_files_with_pattern(
+    workspace_root: str, search_terms: List[str], exclude_paths: Set[str]
+) -> List[Path]:
+    """
+    Find Vyper files in workspace that contain any of the search terms.
+
+    Uses fast text search to pre-filter files before expensive AST parsing.
+
+    Args:
+        workspace_root: Root path of the workspace.
+        search_terms: Terms to search for in file contents.
+        exclude_paths: Normalized paths to skip (already searched).
+
+    Returns:
+        List of file paths that contain at least one search term.
+    """
+    if not workspace_root or not isinstance(workspace_root, str):
+        return []
+
+    root = Path(workspace_root)
+    if not root.exists():
+        return []
+
+    matching_files: List[Path] = []
+    try:
+        for pattern in ("**/*.vy", "**/*.vyi"):
+            for file_path in root.glob(pattern):
+                # Skip files we've already searched
+                normalized = normalize_path(str(file_path))
+                if normalized in exclude_paths:
+                    continue
+
+                # Quick text search - read file and check for terms
+                try:
+                    content = file_path.read_text()
+                    if any(term in content for term in search_terms):
+                        matching_files.append(file_path)
+                except Exception:
+                    continue
+    except Exception as e:
+        logger.debug("Error scanning workspace for Vyper files: %s", e)
+
+    return matching_files
 
 
 def get_all_references(
@@ -319,6 +386,7 @@ def get_all_references(
     position,
     modules_dict: dict,
     include_declaration: bool = False,
+    workspace_root: Optional[str] = None,
 ) -> List[types.Location]:
     """
     Get all references to the symbol at the given position.
@@ -331,6 +399,7 @@ def get_all_references(
         position: The cursor position.
         modules_dict: Dictionary of all loaded modules (uri -> Module).
         include_declaration: Whether to include the definition itself.
+        workspace_root: Root path of the workspace (for scanning additional files).
 
     Returns:
         List of Location objects for each reference found.
@@ -382,8 +451,13 @@ def get_all_references(
     modules.setdefault(resolved.uri, resolved.module)
 
     locations = []
+    searched_paths: Set[str] = set()
+
     for uri, mod in modules.items():
         module_path = normalize_path(_module_path(mod, uri))
+        if not module_path:
+            continue
+        searched_paths.add(module_path)
         search_patterns = []
         definition_node: Optional[BaseNode] = None
 
@@ -411,6 +485,62 @@ def get_all_references(
                 definition_node,
             )
         )
+
+    # Scan workspace for additional files that might reference the symbol
+    if workspace_root and target_path:
+        from pygls import uris as pygls_uris
+
+        # Get search terms for text-based pre-filtering
+        search_terms = _get_search_terms(patterns)
+        if search_terms:
+            # Find files containing the symbol name (fast text search)
+            candidate_files = _find_files_with_pattern(
+                workspace_root, search_terms, searched_paths
+            )
+
+            for file_path in candidate_files:
+                try:
+                    file_uri = pygls_uris.from_fs_path(str(file_path))
+                    if file_uri is None:
+                        continue
+
+                    # Parse the file
+                    file_doc = workspace.get_text_document(file_uri)
+                    file_module = get_module_func(
+                        doc=file_doc, workspace_folder=workspace_root
+                    )
+                    if file_module is None:
+                        continue
+
+                    # Find import aliases that reference the target module
+                    aliases = [
+                        alias
+                        for alias, path in file_module.imports.items()
+                        if normalize_path(path) == target_path
+                    ]
+                    if not aliases:
+                        continue
+
+                    # Build prefixed patterns and search
+                    search_patterns = []
+                    for alias in aliases:
+                        search_patterns.extend(prefix_patterns(patterns, alias))
+
+                    if search_patterns:
+                        locations.extend(
+                            find_references(
+                                file_module,
+                                file_uri,
+                                search_patterns,
+                                include_declaration=False,
+                                definition_node=None,
+                            )
+                        )
+                except Exception as e:
+                    logger.debug(
+                        "Error scanning file %s for references: %s", file_path, e
+                    )
+                    continue
 
     return locations
 
