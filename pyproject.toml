@@ -1,6 +1,6 @@
 [project]
 name = "couleuvre"
-version = "0.0.2"
+version = "0.0.3"
 description = "Vyper Language Server"
 readme = "README.md"
 requires-python = ">=3.10"
