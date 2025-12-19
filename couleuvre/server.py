@@ -8,7 +8,6 @@ and document symbols.
 
 import asyncio
 import logging
-from importlib.metadata import version
 from typing import Dict, List, Optional
 
 from lsprotocol import types
@@ -299,7 +298,7 @@ class VyperLanguageServer(LanguageServer):
         return self.modules.get(doc.uri)
 
 
-server = VyperLanguageServer("couleuvre", f"v{version('couleuvre')}")
+server = VyperLanguageServer("couleuvre", "v0.0.4")
 
 
 # -----------------------------------------------------------------------------
