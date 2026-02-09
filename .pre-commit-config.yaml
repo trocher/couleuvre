@@ -17,6 +17,11 @@ repos:
         args: [ --fix ]
       # Run the formatter.
       - id: ruff-format
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    # uv version.
+    rev: 0.9.26
+    hooks:
+      - id: uv-lock
   - repo: https://github.com/RobertCraigie/pyright-python
     rev: v1.1.407
     hooks:
