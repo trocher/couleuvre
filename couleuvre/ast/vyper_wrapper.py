@@ -46,20 +46,19 @@ def ensure_vyper_version(version: str) -> Path:
         env = os.environ.copy()
         env["VIRTUAL_ENV"] = str(venv_path)
 
-        if Version(version) <= Version("0.2.7"):
-            subprocess.run(
-                [
-                    "uv",
-                    "pip",
-                    "install",
-                    "--python",
-                    venv_python,
-                    "--upgrade",
-                    "setuptools",
-                ],
-                env=env,
-                check=True,
-            )
+        subprocess.run(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                venv_python,
+                "--upgrade",
+                "setuptools",
+            ],
+            env=env,
+            check=True,
+        )
         # Install vyper
         subprocess.run(
             ["uv", "pip", "install", "--python", venv_python, f"vyper=={version}"],
