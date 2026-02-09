@@ -53,6 +53,8 @@ class VyperLanguageServer(LanguageServer):
         self._parse_tasks: Dict[str, asyncio.Task] = {}
         # Debounce timers for full compilation diagnostics
         self._diagnostics_tasks: Dict[str, asyncio.Task] = {}
+        # Main event loop used for scheduling tasks from worker threads
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
 
     def publish_diagnostics(
         self, uri: str, diagnostics: List[types.Diagnostic]
@@ -191,7 +193,13 @@ class VyperLanguageServer(LanguageServer):
         This pre-parses imported modules so that completion and navigation
         for imported symbols is instant.
         """
-        for import_name, resolved_path in module.imports.items():
+        try:
+            running_loop = asyncio.get_running_loop()
+            self._event_loop = running_loop
+        except RuntimeError:
+            running_loop = self._event_loop
+
+        for _import_name, resolved_path in module.imports.items():
             uri = uris.from_fs_path(resolved_path)
             if not uri:
                 continue
@@ -214,7 +222,33 @@ class VyperLanguageServer(LanguageServer):
                 except Exception as e:
                     self.logger.debug("Failed to parse import %s: %s", import_path, e)
 
-            asyncio.create_task(parse_import(uri, resolved_path))
+            if not running_loop or not running_loop.is_running():
+                # If no event loop is available (for example during tests), parse inline.
+                self._parse_import(uri, resolved_path, workspace_path)
+                continue
+
+            def _schedule_task(
+                import_uri: str = uri, import_path: str = resolved_path
+            ) -> None:
+                coro = parse_import(import_uri, import_path)
+                try:
+                    running_loop.create_task(coro)
+                except RuntimeError:
+                    coro.close()
+                    self._parse_import(import_uri, import_path, workspace_path)
+
+            try:
+                try:
+                    current_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    current_loop = None
+
+                if current_loop is running_loop:
+                    _schedule_task()
+                else:
+                    running_loop.call_soon_threadsafe(_schedule_task)
+            except RuntimeError:
+                self._parse_import(uri, resolved_path, workspace_path)
 
     def _parse_import(
         self, uri: str, path: str, workspace_path: Optional[str] = None
