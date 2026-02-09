@@ -203,7 +203,7 @@ def _walk_ast(node: BaseNode):
         current = stack.pop()
         yield current
         # Iterate over dataclass fields
-        for field_name in current.__dataclass_fields__:  # type: ignore[attr-defined]
+        for field_name in current.__dataclass_fields__:
             if field_name == "parent":
                 continue
             value = getattr(current, field_name, None)

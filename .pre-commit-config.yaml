@@ -22,18 +22,11 @@ repos:
     rev: 0.9.26
     hooks:
       - id: uv-lock
-  - repo: https://github.com/RobertCraigie/pyright-python
-    rev: v1.1.407
+  - repo: local
     hooks:
-      - id: pyright
-        additional_dependencies:
-          [
-            beartype,
-            einops,
-            jax,
-            jaxtyping,
-            optax,
-            pytest,
-            typing_extensions,
-            wadler_lindig,
-          ]
+      - id: ty
+        name: ty check
+        entry: uvx ty check
+        language: python
+        pass_filenames: false
+        args: ['couleuvre/', '--ignore', 'unresolved-import']
